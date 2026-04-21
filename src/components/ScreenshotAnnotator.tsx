@@ -196,6 +196,41 @@ export default function ScreenshotAnnotator() {
 	}, [askDownsample]);
 
 	const pasteFromClipboard = useCallback(async () => {
+		const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+		if (isTauri) {
+			try {
+				const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+				const image = await readImage();
+				const bytes = await image.rgba();
+				const { width, height } = await image.size();
+				const canvas = document.createElement('canvas');
+				canvas.width = width;
+				canvas.height = height;
+				const ctx = canvas.getContext('2d');
+				if (!ctx) {
+					setStatus('Could not read clipboard image.');
+					return;
+				}
+				const imageData = new ImageData(
+					new Uint8ClampedArray(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)),
+					width,
+					height,
+				);
+				ctx.putImageData(imageData, 0, 0);
+				const blob: Blob | null = await new Promise((resolve) =>
+					canvas.toBlob((b) => resolve(b), 'image/png'),
+				);
+				if (!blob) {
+					setStatus('Could not read clipboard image.');
+					return;
+				}
+				await loadScreenshot(blob);
+			} catch {
+				setStatus('No image found in the clipboard.');
+			}
+			return;
+		}
+
 		if (!navigator.clipboard || !navigator.clipboard.read) {
 			setStatus('Clipboard API not available. Use Ctrl/Cmd + V instead.');
 			return;
@@ -237,6 +272,26 @@ export default function ScreenshotAnnotator() {
 
 	const [format, setFormat] = useState<'jpeg' | 'png' | 'webp'>('jpeg');
 
+	const [toast, setToast] = useState<string | null>(null);
+	const toastTimerRef = useRef<number | null>(null);
+	const showToast = useCallback((message: string) => {
+		setToast(message);
+		if (toastTimerRef.current !== null) {
+			window.clearTimeout(toastTimerRef.current);
+		}
+		toastTimerRef.current = window.setTimeout(() => {
+			setToast(null);
+			toastTimerRef.current = null;
+		}, 2500);
+	}, []);
+	useEffect(() => {
+		return () => {
+			if (toastTimerRef.current !== null) {
+				window.clearTimeout(toastTimerRef.current);
+			}
+		};
+	}, []);
+
 	const downloadImage = useCallback(async () => {
 		const editor = editorRef.current;
 		if (!editor) return;
@@ -257,11 +312,13 @@ export default function ScreenshotAnnotator() {
 				quality: 0.92,
 			});
 			const ext = format === 'jpeg' ? 'jpg' : format;
-			downloadBlob(blob, `annotated-${Date.now()}.${ext}`);
+			const filename = `annotated-${Date.now()}.${ext}`;
+			downloadBlob(blob, filename);
+			showToast(`Saved ${filename}`);
 		} catch {
 			setStatus(`Could not generate ${format.toUpperCase()}.`);
 		}
-	}, [format]);
+	}, [format, showToast]);
 
 	const enterPreview = useCallback(() => {
 		const editor = editorRef.current;
@@ -358,6 +415,11 @@ export default function ScreenshotAnnotator() {
 					</span>
 				)}
 				{status && <span className="sa-status">{status}</span>}
+				{toast && (
+					<span className="sa-toast" role="status" aria-live="polite">
+						{toast}
+					</span>
+				)}
 
 				<button
 					type="button"
