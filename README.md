@@ -1,5 +1,9 @@
 # Quick Screenshot Annotator
 
+```
+bun run tauri dev
+```
+
 A minimal desktop app for quickly annotating screenshots. Paste a screenshot from
 the clipboard, scribble on top of it with [tldraw](https://tldraw.dev), and export
 the result as PNG, JPEG, or WebP. All processing happens locally — nothing is

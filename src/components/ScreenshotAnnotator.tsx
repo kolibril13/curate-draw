@@ -61,6 +61,28 @@ function downloadBlob(blob: Blob, filename: string) {
 	URL.revokeObjectURL(url);
 }
 
+const OUTPUT_FOLDER_STORAGE_KEY = 'sa.outputFolder';
+
+function isTauriRuntime(): boolean {
+	return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+async function saveBlobToFolder(
+	blob: Blob,
+	folder: string,
+	filename: string,
+): Promise<string> {
+	const { invoke } = await import('@tauri-apps/api/core');
+	const buf = await blob.arrayBuffer();
+	const bytes = Array.from(new Uint8Array(buf));
+	const savedPath = await invoke<string>('save_image_to_folder', {
+		folder,
+		filename,
+		bytes,
+	});
+	return savedPath;
+}
+
 export default function ScreenshotAnnotator() {
 	const editorRef = useRef<Editor | null>(null);
 	const dimsRef = useRef<Dimensions | null>(null);
@@ -272,6 +294,42 @@ export default function ScreenshotAnnotator() {
 
 	const [format, setFormat] = useState<'jpeg' | 'png' | 'webp'>('jpeg');
 
+	const [outputFolder, setOutputFolder] = useState<string>(() => {
+		if (typeof window === 'undefined') return '';
+		try {
+			return window.localStorage.getItem(OUTPUT_FOLDER_STORAGE_KEY) ?? '';
+		} catch {
+			return '';
+		}
+	});
+	useEffect(() => {
+		if (typeof window === 'undefined') return;
+		try {
+			window.localStorage.setItem(OUTPUT_FOLDER_STORAGE_KEY, outputFolder);
+		} catch {
+			// ignore storage errors (e.g. private mode)
+		}
+	}, [outputFolder]);
+
+	const pickOutputFolder = useCallback(async () => {
+		if (!isTauriRuntime()) return;
+		try {
+			const { open } = await import('@tauri-apps/plugin-dialog');
+			const selected = await open({
+				directory: true,
+				multiple: false,
+				title: 'Choose output folder',
+				defaultPath: outputFolder.trim() || undefined,
+			});
+			if (typeof selected === 'string' && selected.length > 0) {
+				setOutputFolder(selected);
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			setStatus(`Could not open folder picker: ${message}`);
+		}
+	}, [outputFolder]);
+
 	const [toast, setToast] = useState<string | null>(null);
 	const toastTimerRef = useRef<number | null>(null);
 	const showToast = useCallback((message: string) => {
@@ -313,12 +371,26 @@ export default function ScreenshotAnnotator() {
 			});
 			const ext = format === 'jpeg' ? 'jpg' : format;
 			const filename = `annotated-${Date.now()}.${ext}`;
+
+			const trimmedFolder = outputFolder.trim();
+			if (trimmedFolder && isTauriRuntime()) {
+				try {
+					const savedPath = await saveBlobToFolder(blob, trimmedFolder, filename);
+					setStatus(null);
+					showToast(`Saved to ${savedPath}`);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					setStatus(`Could not save to folder: ${message}`);
+				}
+				return;
+			}
+
 			downloadBlob(blob, filename);
 			showToast(`Saved ${filename}`);
 		} catch {
 			setStatus(`Could not generate ${format.toUpperCase()}.`);
 		}
-	}, [format, showToast]);
+	}, [format, outputFolder, showToast]);
 
 	const enterPreview = useCallback(() => {
 		const editor = editorRef.current;
@@ -368,68 +440,137 @@ export default function ScreenshotAnnotator() {
 	return (
 		<div className="sa-root">
 			<div className="sa-toolbar">
-				<button
-					type="button"
-					className="sa-button"
-					onClick={pasteFromClipboard}
-					disabled={!isEditing}
-					title={isEditing ? undefined : 'Switch to edit mode to paste'}
-				>
-					Paste screenshot
-				</button>
-
-				{isEditing ? (
-					<button type="button" className="sa-button" onClick={enterPreview}>
-						Preview
-					</button>
-				) : (
-					<button type="button" className="sa-button" onClick={exitPreview}>
-						Edit drawing
-					</button>
-				)}
-
-				<div className="sa-segment" role="group" aria-label="Export format">
-					{(['jpeg', 'png', 'webp'] as const).map((f) => (
+				<div className="sa-group">
+					<div className="sa-stack">
 						<button
-							key={f}
 							type="button"
-							className={`sa-segment-btn${format === f ? ' is-active' : ''}`}
-							onClick={() => setFormat(f)}
-							aria-pressed={format === f}
+							className="sa-button"
+							onClick={pasteFromClipboard}
+							disabled={!isEditing}
+							title={isEditing ? undefined : 'Switch to edit mode to paste'}
 						>
-							{f.toUpperCase()}
+							Paste screenshot
 						</button>
-					))}
+						<span className="sa-hint">
+							or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd>
+						</span>
+					</div>
 				</div>
 
-				<button type="button" className="sa-button" onClick={downloadImage}>
-					Download {format.toUpperCase()}
-				</button>
+				<span className="sa-sep" aria-hidden="true" />
 
-				<span className="sa-hint">
-					or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd>
-				</span>
-				{dims && (
-					<span className="sa-dims">
-						{dims.w} × {dims.h}px
-					</span>
-				)}
-				{status && <span className="sa-status">{status}</span>}
-				{toast && (
-					<span className="sa-toast" role="status" aria-live="polite">
-						{toast}
-					</span>
-				)}
+				<div className="sa-group sa-group--export">
+					<div className="sa-segment" role="group" aria-label="Export format">
+						{(['jpeg', 'png', 'webp'] as const).map((f) => (
+							<button
+								key={f}
+								type="button"
+								className={`sa-segment-btn${format === f ? ' is-active' : ''}`}
+								onClick={() => setFormat(f)}
+								aria-pressed={format === f}
+							>
+								{f.toUpperCase()}
+							</button>
+						))}
+					</div>
 
-				<button
-					type="button"
-					className="sa-button sa-button--ghost"
-					onClick={() => setShowAbout(true)}
-					aria-haspopup="dialog"
-					aria-expanded={showAbout}
-				>
-					Info
-				</button>
+					<button type="button" className="sa-button" onClick={downloadImage}>
+						{outputFolder.trim() && isTauriRuntime() ? 'Save' : 'Download'}{' '}
+						{format.toUpperCase()}
+					</button>
+
+					<label className="sa-field" title="Optional. Paste a folder path to save directly to disk.">
+						<span className="sa-field-label">Output folder</span>
+						<div className="sa-input-wrap">
+							<input
+								type="text"
+								className="sa-input"
+								value={outputFolder}
+								onChange={(e) => setOutputFolder(e.target.value)}
+								placeholder={
+									isTauriRuntime()
+										? '/path/to/folder (optional)'
+										: 'Only available in the desktop app'
+								}
+								spellCheck={false}
+								autoCorrect="off"
+								autoCapitalize="off"
+								disabled={!isTauriRuntime()}
+							/>
+							{isTauriRuntime() && (
+								<button
+									type="button"
+									className="sa-input-icon"
+									aria-label="Choose output folder"
+									title="Choose folder…"
+									onClick={pickOutputFolder}
+								>
+									<svg
+										width="14"
+										height="14"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="currentColor"
+										strokeWidth="1.4"
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M1.5 4.5a1 1 0 0 1 1-1h3.3l1.4 1.4h6.3a1 1 0 0 1 1 1v6.6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4.5Z" />
+									</svg>
+								</button>
+							)}
+							{outputFolder && (
+								<button
+									type="button"
+									className="sa-input-clear"
+									aria-label="Clear output folder"
+									onClick={() => setOutputFolder('')}
+								>
+									×
+								</button>
+							)}
+						</div>
+					</label>
+
+					{isEditing ? (
+						<button type="button" className="sa-button" onClick={enterPreview}>
+							Preview
+						</button>
+					) : (
+						<button type="button" className="sa-button" onClick={exitPreview}>
+							Edit drawing
+						</button>
+					)}
+				</div>
+
+				<span className="sa-spacer" aria-hidden="true" />
+
+				<div className="sa-group sa-group--right">
+					{status && <span className="sa-status">{status}</span>}
+					{toast && (
+						<span className="sa-toast" role="status" aria-live="polite">
+							{toast}
+						</span>
+					)}
+					{dims && (
+						<span className="sa-dims" title="Screenshot dimensions">
+							{dims.w.toLocaleString()} × {dims.h.toLocaleString()} px
+						</span>
+					)}
+
+					<span className="sa-sep" aria-hidden="true" />
+
+					<button
+						type="button"
+						className="sa-button sa-button--ghost"
+						onClick={() => setShowAbout(true)}
+						aria-haspopup="dialog"
+						aria-expanded={showAbout}
+					>
+						Info
+					</button>
+				</div>
 			</div>
 
 			<div className="sa-canvas">
