@@ -571,17 +571,18 @@ export default function ScreenshotAnnotator() {
 							Edit drawing
 						</button>
 					)}
+
+					{toast && (
+						<span className="sa-toast" role="status" aria-live="polite">
+							{toast}
+						</span>
+					)}
 				</div>
 
 				<span className="sa-spacer" aria-hidden="true" />
 
 				<div className="sa-group sa-group--right">
 					{status && <span className="sa-status">{status}</span>}
-					{toast && (
-						<span className="sa-toast" role="status" aria-live="polite">
-							{toast}
-						</span>
-					)}
 					{dims && (
 						<span className="sa-dims" title="Screenshot dimensions">
 							{dims.w.toLocaleString()} × {dims.h.toLocaleString()} px
