@@ -240,6 +240,13 @@ body,
 	gap: 0.55rem;
 }
 
+.sa-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
 .sa-stack .sa-hint {
 	padding-left: 0.1rem;
 }
@@ -506,4 +513,40 @@ body,
 
 .sa-about-close:hover {
 	border-color: var(--navy);
+}
+
+.sa-snippet {
+	margin: 0.75rem 0;
+}
+
+.sa-snippet-label {
+	font-size: 0.65rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	font-weight: 700;
+	color: color-mix(in srgb, var(--navy) 70%, transparent);
+	margin-bottom: 0.3rem;
+}
+
+.sa-snippet-row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: stretch;
+}
+
+.sa-snippet-code {
+	flex: 1;
+	min-width: 0;
+	font-family: 'Space Mono', monospace;
+	font-size: 0.75rem;
+	padding: 0.45rem 0.6rem;
+	border: 1px solid color-mix(in srgb, var(--navy) 25%, transparent);
+	border-radius: 3px;
+	background: var(--cream);
+	color: var(--navy);
+	overflow-x: auto;
+	white-space: nowrap;
+	display: flex;
+	align-items: center;
+	user-select: all;
 }

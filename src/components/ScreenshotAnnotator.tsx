@@ -1,16 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	AssetRecordType,
 	Box,
 	createShapeId,
 	DefaultColorStyle,
+	DefaultMainMenu,
+	DefaultMainMenuContent,
+	DefaultQuickActionsContent,
 	DefaultSizeStyle,
 	getSnapshot,
 	STROKE_SIZES,
 	Tldraw,
 	TldrawImage,
+	TldrawUiMenuContextProvider,
+	TldrawUiMenuGroup,
+	TldrawUiMenuItem,
 	toRichText,
 	type Editor,
+	type TLComponents,
 	type TLEditorSnapshot,
 	type TLPageId,
 } from 'tldraw';
@@ -124,6 +131,8 @@ export default function ScreenshotAnnotator() {
 	const [previewPageId, setPreviewPageId] = useState<TLPageId | undefined>();
 	const [previewBounds, setPreviewBounds] = useState<Box | null>(null);
 	const [isDarkMode, setIsDarkMode] = useState(false);
+	const [isEditorReady, setIsEditorReady] = useState(false);
+	const hasStartupCapturedRef = useRef(false);
 
 	useEffect(() => {
 		dimsRef.current = dims;
@@ -229,6 +238,37 @@ export default function ScreenshotAnnotator() {
 
 		setDims({ w, h });
 	}, [askDownsample]);
+
+	const captureScreenshot = useCallback(async () => {
+		if (!isTauriRuntime()) {
+			setStatus('Screen capture is only available in the desktop app.');
+			return;
+		}
+		setStatus(null);
+		try {
+			const { invoke } = await import('@tauri-apps/api/core');
+			const bytes = await invoke<number[]>('capture_screenshot');
+			const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
+			await loadScreenshot(blob);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			// Sentinel from the Rust side when the user presses Esc.
+			if (message === 'cancelled') return;
+			setStatus(`Could not capture screenshot: ${message}`);
+		}
+	}, [loadScreenshot]);
+
+	// On desktop, launch straight into the selection tool: the window stays
+	// hidden (per tauri.conf) until the Rust side reveals it at the end of
+	// `capture_screenshot`. Gated on the editor being mounted so the incoming
+	// screenshot never races tldraw's init.
+	useEffect(() => {
+		if (!isTauriRuntime()) return;
+		if (!isEditorReady) return;
+		if (hasStartupCapturedRef.current) return;
+		hasStartupCapturedRef.current = true;
+		void captureScreenshot();
+	}, [isEditorReady, captureScreenshot]);
 
 	const pasteFromClipboard = useCallback(async () => {
 		const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -381,6 +421,40 @@ export default function ScreenshotAnnotator() {
 		};
 	}, []);
 
+	const [savedImage, setSavedImage] = useState<{ filename: string } | null>(null);
+	const [copiedKey, setCopiedKey] = useState<string | null>(null);
+	const copyTimerRef = useRef<number | null>(null);
+	const copySnippet = useCallback(async (key: string, text: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopiedKey(key);
+			if (copyTimerRef.current !== null) {
+				window.clearTimeout(copyTimerRef.current);
+			}
+			copyTimerRef.current = window.setTimeout(() => {
+				setCopiedKey(null);
+				copyTimerRef.current = null;
+			}, 1500);
+		} catch {
+			// ignore clipboard errors
+		}
+	}, []);
+	useEffect(() => {
+		return () => {
+			if (copyTimerRef.current !== null) {
+				window.clearTimeout(copyTimerRef.current);
+			}
+		};
+	}, []);
+	useEffect(() => {
+		if (!savedImage) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') setSavedImage(null);
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [savedImage]);
+
 	const downloadImage = useCallback(async () => {
 		const editor = editorRef.current;
 		if (!editor) return;
@@ -410,6 +484,7 @@ export default function ScreenshotAnnotator() {
 					const savedPath = await saveBlobToFolder(blob, trimmedFolder, filename);
 					setStatus(null);
 					showToast(`Saved to ${savedPath}`);
+					setSavedImage({ filename });
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					setStatus(`Could not save to folder: ${message}`);
@@ -419,10 +494,63 @@ export default function ScreenshotAnnotator() {
 
 			downloadBlob(blob, filename);
 			showToast(`Saved ${filename}`);
+			setSavedImage({ filename });
 		} catch {
 			setStatus(`Could not generate ${format.toUpperCase()}.`);
 		}
 	}, [format, outputFolder, showToast]);
+
+	const clearAll = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor) return;
+		editor.run(
+			() => {
+				const shapeIds = [...editor.getCurrentPageShapeIds()];
+				if (shapeIds.length > 0) {
+					editor.deleteShapes(shapeIds);
+				}
+				const assetIds = editor.getAssets().map((a) => a.id);
+				if (assetIds.length > 0) {
+					editor.deleteAssets(assetIds);
+				}
+			},
+			{ history: 'ignore', ignoreShapeLock: true },
+		);
+		setDims(null);
+		setStatus(null);
+	}, []);
+
+	const tldrawComponents = useMemo<TLComponents>(
+		() => ({
+			MainMenu: () => (
+				<DefaultMainMenu>
+					<TldrawUiMenuGroup id="annotator-actions">
+						<TldrawUiMenuItem
+							id="clear-all"
+							label="Clear all"
+							icon="cross-2"
+							readonlyOk={false}
+							onSelect={clearAll}
+						/>
+					</TldrawUiMenuGroup>
+					<DefaultMainMenuContent />
+				</DefaultMainMenu>
+			),
+			QuickActions: () => (
+				<TldrawUiMenuContextProvider type="small-icons" sourceId="quick-actions">
+					<DefaultQuickActionsContent />
+					<TldrawUiMenuItem
+						id="clear-all"
+						label="Clear all"
+						icon="cross-2"
+						readonlyOk={false}
+						onSelect={clearAll}
+					/>
+				</TldrawUiMenuContextProvider>
+			),
+		}),
+		[clearAll],
+	);
 
 	const enterPreview = useCallback(() => {
 		const editor = editorRef.current;
@@ -483,17 +611,42 @@ export default function ScreenshotAnnotator() {
 			<div className="sa-toolbar">
 				<div className="sa-group">
 					<div className="sa-stack">
-						<button
-							type="button"
-							className="sa-button"
-							onClick={pasteFromClipboard}
-							disabled={!isEditing}
-							title={isEditing ? undefined : 'Switch to edit mode to paste'}
-						>
-							Paste screenshot
-						</button>
+						<div className="sa-row">
+							{isTauriRuntime() && (
+								<button
+									type="button"
+									className="sa-button sa-button--primary"
+									onClick={captureScreenshot}
+									disabled={!isEditing}
+									title={
+										isEditing
+											? 'Hide the app and capture a region of the screen'
+											: 'Switch to edit mode to capture'
+									}
+								>
+									Capture screenshot
+								</button>
+							)}
+							<button
+								type="button"
+								className="sa-button"
+								onClick={pasteFromClipboard}
+								disabled={!isEditing}
+								title={isEditing ? undefined : 'Switch to edit mode to paste'}
+							>
+								Paste screenshot
+							</button>
+						</div>
 						<span className="sa-hint">
-							or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd>
+							{isTauriRuntime() ? (
+								<>
+									capture, or paste with <kbd>⌘</kbd> + <kbd>V</kbd>
+								</>
+							) : (
+								<>
+									or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd>
+								</>
+							)}
 						</span>
 					</div>
 				</div>
@@ -634,6 +787,7 @@ export default function ScreenshotAnnotator() {
 						licenseKey={TLDRAW_LICENSE_KEY}
 						assetUrls={assetUrls}
 						snapshot={snapshot}
+						components={tldrawComponents}
 						onMount={(editor) => {
 							editorRef.current = editor;
 							editor.setStyleForNextShapes(DefaultColorStyle, 'orange');
@@ -645,6 +799,7 @@ export default function ScreenshotAnnotator() {
 								});
 								if (previewPageId) editor.setCurrentPage(previewPageId);
 							}
+							setIsEditorReady(true);
 						}}
 					/>
 				) : snapshot && previewBounds ? (
@@ -760,6 +915,52 @@ export default function ScreenshotAnnotator() {
 					</div>
 				</div>
 			)}
+
+			{savedImage && (() => {
+				const snippet = `<img src="${savedImage.filename}" />`;
+				return (
+					<div
+						className="sa-about-backdrop"
+						role="dialog"
+						aria-modal="true"
+						aria-label="Image saved"
+						onClick={() => setSavedImage(null)}
+					>
+						<div className="sa-about-dialog" onClick={(e) => e.stopPropagation()}>
+							<button
+								type="button"
+								className="sa-about-close"
+								aria-label="Close"
+								onClick={() => setSavedImage(null)}
+							>
+								×
+							</button>
+							<h2>Image saved</h2>
+							<div className="sa-snippet">
+								<div className="sa-snippet-row">
+									<code className="sa-snippet-code">{snippet}</code>
+									<button
+										type="button"
+										className="sa-button"
+										onClick={() => copySnippet('filename', snippet)}
+									>
+										{copiedKey === 'filename' ? 'Copied' : 'Copy'}
+									</button>
+								</div>
+							</div>
+							<div className="sa-about-actions">
+								<button
+									type="button"
+									className="sa-button"
+									onClick={() => setSavedImage(null)}
+								>
+									Close
+								</button>
+							</div>
+						</div>
+					</div>
+				);
+			})()}
 
 			{downsamplePrompt && (
 				<div

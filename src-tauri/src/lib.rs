@@ -38,6 +38,73 @@ fn dirs_home() -> PathBuf {
     PathBuf::from(".")
 }
 
+/// Capture a screenshot using the built-in macOS `screencapture` tool.
+///
+/// Works for two flows:
+///   * **Launch flow** – the window starts hidden (`visible: false` in
+///     `tauri.conf.json`); we run the selection UI first, then reveal the
+///     window with the shot loaded.
+///   * **In-app flow** – the window is visible; we hide it, capture, then
+///     bring it back.
+///
+/// In both cases the window is shown + focused at the end regardless of
+/// outcome, so the user is never stuck staring at a hidden window. Returns
+/// the sentinel `"cancelled"` if the user aborts with Esc so the frontend
+/// can treat that as a no-op.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn capture_screenshot(window: tauri::WebviewWindow) -> Result<Vec<u8>, String> {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "curate-draw-{}-{}.png",
+        std::process::id(),
+        stamp
+    ));
+
+    let was_visible = window.is_visible().unwrap_or(false);
+    if was_visible {
+        let _ = window.hide();
+        // Give macOS a moment to actually hide the window before the
+        // selection overlay appears, otherwise it can show up in the shot.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    let status = Command::new("/usr/sbin/screencapture")
+        .arg("-i") // interactive selection
+        .arg("-x") // silent (no shutter sound)
+        .arg(&tmp)
+        .status();
+
+    // Always reveal the window afterwards – success, cancel, or error.
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    let status = status.map_err(|e| format!("Failed to launch screencapture: {}", e))?;
+    if !status.success() {
+        return Err(format!("screencapture exited with status {}", status));
+    }
+    if !tmp.exists() {
+        return Err("cancelled".to_string());
+    }
+
+    let bytes = std::fs::read(&tmp).map_err(|e| format!("Could not read captured image: {}", e))?;
+    let _ = std::fs::remove_file(&tmp);
+    Ok(bytes)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn capture_screenshot(_window: tauri::WebviewWindow) -> Result<Vec<u8>, String> {
+    Err("Screenshot capture is only supported on macOS.".to_string())
+}
+
 #[tauri::command]
 fn save_image_to_folder(
     folder: String,
@@ -79,7 +146,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, save_image_to_folder])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            save_image_to_folder,
+            capture_screenshot
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
