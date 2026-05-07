@@ -15,7 +15,8 @@
       "Bash(echo \"Exit: $?\")",
       "Bash(ls /Users/jan-hendrik/projects/tauri-tldraw-annotate/README*)",
       "Bash(cargo check *)",
-      "Bash(security find-certificate *)"
+      "Bash(security find-certificate *)",
+      "Bash(npm install *)"
     ]
   }
 }
