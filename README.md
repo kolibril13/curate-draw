@@ -1,9 +1,9 @@
 # Quick Screenshot Annotator
 
 ```bash
-npm run tauri dev                        # dev build with hot reload  (most used)
-npm run tauri build -- --bundles app     # production build only (no permission reset)
-npm install                              # install dependencies
+bun run tauri dev                        # dev build with hot reload  (most used)
+bun run release                          # build + publish to website
+bun install                              # install dependencies
 python3 scripts/copy_release_to_downloads.py  # copy .app/.dmg to ~/Downloads
 ```
 
@@ -51,6 +51,21 @@ Key files:
 ```bash
 bun install
 ```
+
+## Release
+
+To publish a new version to the website:
+
+1. Bump `version` in `package.json` (the Tauri build picks it up via
+   `"version": "../package.json"` in `tauri.conf.json`).
+2. Run:
+   ```bash
+   bun run release
+   ```
+   This builds a signed `.app` bundle, zips it, and copies both the archive
+   and a `curate-draw-version.json` version file into the website project at
+   `~/projects/jan-hendrik-mueller.de/public/`.
+3. Commit & push both this repo and the website repo.
 
 ## Build
 

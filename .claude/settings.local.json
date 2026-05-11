@@ -24,7 +24,8 @@
       "Bash(echo 'export APPLE_PASSWORD=\"xxxx-xxxx-xxxx-xxxx\"')",
       "Bash(echo 'export APPLE_TEAM_ID=\"D97HVFC4GT\"')",
       "Bash(open *)",
-      "Bash(ditto -c -k --sequesterRsrc --keepParent /Users/jan-hendrik/projects/tauri-tldraw-annotate/src-tauri/target/release/bundle/macos/curate-draw.app /Users/jan-hendrik/projects/jan-hendrik-mueller.de/public/curate-draw.zip)"
+      "Bash(ditto -c -k --sequesterRsrc --keepParent /Users/jan-hendrik/projects/tauri-tldraw-annotate/src-tauri/target/release/bundle/macos/curate-draw.app /Users/jan-hendrik/projects/jan-hendrik-mueller.de/public/curate-draw.zip)",
+      "Read(//Users/jan-hendrik/projects/jan-hendrik-mueller.de/public/**)"
     ]
   }
 }
