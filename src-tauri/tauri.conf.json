@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Quick Screenshot Annotator",
+        "title": "Curate Draw",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
