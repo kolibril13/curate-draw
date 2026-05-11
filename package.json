@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "bun tauri build --bundles app && ditto -c -k --sequesterRsrc --keepParent src-tauri/target/release/bundle/macos/curate-draw.app /Users/jan-hendrik/projects/jan-hendrik-mueller.de/public/curate-draw.zip"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
