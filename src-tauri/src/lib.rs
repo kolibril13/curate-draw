@@ -142,7 +142,6 @@ fn save_image_to_folder(
 
 /// Read the clipboard image as raw PNG bytes (with ICC profile intact).
 ///
-
 /// The `tauri-plugin-clipboard-manager` only exposes decoded RGBA pixel data,
 /// which strips the color profile. On macOS screenshots are in Display P3; if
 /// those values are re-encoded as sRGB PNG via a canvas they come out washed
@@ -152,33 +151,20 @@ fn save_image_to_folder(
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn read_clipboard_png() -> Result<Vec<u8>, String> {
-    use objc::runtime::Object;
-    use objc::{class, msg_send, sel, sel_impl};
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::NSString;
 
-    unsafe {
-        let pasteboard: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
+    let pasteboard = NSPasteboard::generalPasteboard();
+    let png_type = NSString::from_str("public.png");
 
-        let png_str = b"public.png\0".as_ptr() as *const std::os::raw::c_char;
-        let png_type: *mut Object =
-            msg_send![class!(NSString), stringWithUTF8String: png_str];
-
-        let data: *mut Object = msg_send![pasteboard, dataForType: png_type];
-        if data.is_null() {
-            return Err("no_image".to_string());
-        }
-
-        let length: usize = msg_send![data, length];
-        if length == 0 {
-            return Err("no_image".to_string());
-        }
-
-        let bytes: *const u8 = msg_send![data, bytes];
-        if bytes.is_null() {
-            return Err("no_image".to_string());
-        }
-
-        Ok(std::slice::from_raw_parts(bytes, length).to_vec())
+    let data = pasteboard
+        .dataForType(&png_type)
+        .ok_or_else(|| "no_image".to_string())?;
+    if data.is_empty() {
+        return Err("no_image".to_string());
     }
+
+    Ok(data.to_vec())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -195,34 +181,22 @@ fn read_clipboard_png() -> Result<Vec<u8>, String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn write_clipboard_png(bytes: Vec<u8>) -> Result<(), String> {
-    use objc::runtime::Object;
-    use objc::{class, msg_send, sel, sel_impl};
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::{NSData, NSString};
 
     if bytes.is_empty() {
         return Err("empty".to_string());
     }
 
-    unsafe {
-        let pasteboard: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
-        let _: i64 = msg_send![pasteboard, clearContents];
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
 
-        let data: *mut Object = msg_send![
-            class!(NSData),
-            dataWithBytes: bytes.as_ptr() as *const std::os::raw::c_void
-            length: bytes.len()
-        ];
-        if data.is_null() {
-            return Err("could not allocate NSData".to_string());
-        }
+    let data = NSData::with_bytes(&bytes);
+    let png_type = NSString::from_str("public.png");
 
-        let png_str = b"public.png\0".as_ptr() as *const std::os::raw::c_char;
-        let png_type: *mut Object =
-            msg_send![class!(NSString), stringWithUTF8String: png_str];
-
-        let ok: bool = msg_send![pasteboard, setData: data forType: png_type];
-        if !ok {
-            return Err("pasteboard rejected data".to_string());
-        }
+    let ok = pasteboard.setData_forType(Some(&data), &png_type);
+    if !ok {
+        return Err("pasteboard rejected data".to_string());
     }
 
     Ok(())
