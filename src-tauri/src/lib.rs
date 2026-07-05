@@ -151,20 +151,45 @@ fn save_image_to_folder(
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn read_clipboard_png() -> Result<Vec<u8>, String> {
-    use objc2_app_kit::NSPasteboard;
-    use objc2_foundation::NSString;
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard};
+    use objc2_foundation::{NSDictionary, NSString};
 
     let pasteboard = NSPasteboard::generalPasteboard();
-    let png_type = NSString::from_str("public.png");
 
-    let data = pasteboard
-        .dataForType(&png_type)
-        .ok_or_else(|| "no_image".to_string())?;
-    if data.is_empty() {
-        return Err("no_image".to_string());
+    // Preferred path: the clipboard already holds PNG bytes, which keep their
+    // embedded ICC profile (e.g. Display P3) intact. Return them verbatim.
+    let png_type = NSString::from_str("public.png");
+    if let Some(data) = pasteboard.dataForType(&png_type) {
+        if !data.is_empty() {
+            return Ok(data.to_vec());
+        }
     }
 
-    Ok(data.to_vec())
+    // Fallback: many sources (Preview, browsers, some copy flows) put the image
+    // on the pasteboard as TIFF/JPEG rather than PNG. Decode whatever bitmap is
+    // there and re-encode it as PNG so the frontend always receives PNG bytes.
+    for ty in ["public.tiff", "public.jpeg"] {
+        let ns_ty = NSString::from_str(ty);
+        let Some(data) = pasteboard.dataForType(&ns_ty) else {
+            continue;
+        };
+        if data.is_empty() {
+            continue;
+        }
+        let rep = NSBitmapImageRep::initWithData(NSBitmapImageRep::alloc(), &data)
+            .ok_or_else(|| "could not decode clipboard image".to_string())?;
+        let props = NSDictionary::new();
+        // SAFETY: `rep` is a valid bitmap rep just decoded above, and `props` is
+        // an empty, properly-typed properties dictionary.
+        let png = unsafe {
+            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)
+        }
+        .ok_or_else(|| "could not encode clipboard image as PNG".to_string())?;
+        return Ok(png.to_vec());
+    }
+
+    Err("no_image".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
