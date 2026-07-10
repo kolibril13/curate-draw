@@ -50,6 +50,11 @@ const POINTERS = [
 	{ id: createShapeId('screenshot-pointer-down'), emoji: '👇' },
 ];
 
+const STATUS_MARKS = [
+	{ id: createShapeId('screenshot-status-reject'), emoji: '❌' },
+	{ id: createShapeId('screenshot-status-approve'), emoji: '✅' },
+];
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
 	return await new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -218,6 +223,9 @@ export default function ScreenshotAnnotator() {
 				for (const p of POINTERS) {
 					if (editor.getShape(p.id)) editor.deleteShape(p.id);
 				}
+				for (const s of STATUS_MARKS) {
+					if (editor.getShape(s.id)) editor.deleteShape(s.id);
+				}
 
 				const assetId = AssetRecordType.createId();
 				editor.createAssets([
@@ -275,6 +283,26 @@ export default function ScreenshotAnnotator() {
 					const b = editor.getShapePageBounds(p.id);
 					pointerY += (b ? b.h : 60 * pointerScale) + pointerGap;
 				}
+
+				const statusGap = 12 * pointerScale;
+				const statusY = h + Math.round(24 * pointerScale);
+				let statusX = 0;
+				for (const s of STATUS_MARKS) {
+					editor.createShape({
+						id: s.id,
+						type: 'text',
+						x: statusX,
+						y: statusY,
+						props: {
+							richText: toRichText(s.emoji),
+							size: 'xl',
+							scale: pointerScale,
+							autoSize: true,
+						},
+					});
+					const b = editor.getShapePageBounds(s.id);
+					statusX += (b ? b.w : 60 * pointerScale) + statusGap;
+				}
 			},
 			{ history: 'ignore', ignoreShapeLock: true },
 		);
@@ -283,7 +311,12 @@ export default function ScreenshotAnnotator() {
 		const pointerBoundsList = POINTERS.map((p) => editor.getShapePageBounds(p.id)).filter(
 			(b): b is Box => !!b,
 		);
-		const allBounds = [frameBounds, ...pointerBoundsList].filter((b): b is Box => !!b);
+		const statusBoundsList = STATUS_MARKS.map((s) => editor.getShapePageBounds(s.id)).filter(
+			(b): b is Box => !!b,
+		);
+		const allBounds = [frameBounds, ...pointerBoundsList, ...statusBoundsList].filter(
+			(b): b is Box => !!b,
+		);
 		const zoomBounds = allBounds.length > 0 ? Box.Common(allBounds) : null;
 		if (zoomBounds) {
 			editor.zoomToBounds(zoomBounds, { inset: 48, animation: { duration: 200 } });
