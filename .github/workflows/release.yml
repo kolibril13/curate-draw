@@ -1,8 +1,7 @@
 name: Release
 
-# Build, sign, and notarize the macOS app on a version tag, then attach the
-# signed .dmg + .app to a GitHub Release (created as a draft so you can review
-# before publishing).
+# Build, sign, and notarize the macOS app on a version tag, then publish the
+# signed .dmg + .app to a public GitHub Release named after the tag.
 #
 # --- Required repository secrets (5) --------------------------------------
 # Settings -> Secrets and variables -> Actions -> New repository secret
@@ -26,9 +25,9 @@ name: Release
 #
 # --- Cutting a release -----------------------------------------------------
 # Bump "version" in package.json, commit, then push a matching tag:
-#   git tag v0.1.8 && git push origin v0.1.8
-# The workflow builds a universal (Intel + Apple Silicon) binary and opens a
-# draft release named after the tag. Review it on GitHub, then hit Publish.
+#   git tag v0.1.9 && git push origin v0.1.9
+# The workflow builds a universal (Intel + Apple Silicon) binary and publishes
+# a public release named after the tag.
 
 on:
   push:
@@ -73,6 +72,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Curate Draw ${{ github.ref_name }}
           releaseBody: Download the signed, notarized macOS app below.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
