@@ -23,11 +23,10 @@ name: Release
 #     it's a plain literal, not a secret.
 #   * GITHUB_TOKEN is provided automatically.
 #
-# Optional secret:
+# Also needed (for the final website-rebuild step):
 #   CF_DEPLOY_HOOK_URL  Cloudflare Pages deploy-hook URL for jan-hendrik-mueller.de.
-#                       If set, the final step pings it so the website rebuilds and
-#                       its download page picks up the new release. If unset, that
-#                       step is skipped and the job still succeeds.
+#                       The final step pings it so the website rebuilds and its
+#                       download page picks up the new release.
 #
 # --- Cutting a release -----------------------------------------------------
 # Bump "version" in package.json, commit, then push a matching tag:
@@ -85,7 +84,5 @@ jobs:
       # Ping the Cloudflare Pages deploy hook so jan-hendrik-mueller.de rebuilds
       # and its download page picks up this new release. The page fetches the
       # GitHub releases at build time, so it only updates when the site rebuilds.
-      # Guarded so the job stays green if the hook secret isn't configured.
       - name: Trigger website rebuild
-        if: ${{ secrets.CF_DEPLOY_HOOK_URL != '' }}
         run: curl -X POST "${{ secrets.CF_DEPLOY_HOOK_URL }}"
