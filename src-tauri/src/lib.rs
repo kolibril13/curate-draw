@@ -38,6 +38,21 @@ fn dirs_home() -> PathBuf {
     PathBuf::from(".")
 }
 
+/// Reveal the main window – used both at the end of `capture_screenshot` and
+/// by the frontend's startup flow when it loads a screenshot straight from
+/// the clipboard instead of capturing (the window starts hidden per
+/// `tauri.conf.json`, so something has to bring it to front either way).
+fn reveal(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+#[tauri::command]
+fn reveal_window(window: tauri::WebviewWindow) {
+    reveal(&window);
+}
+
 /// Capture a screenshot using the built-in macOS `screencapture` tool.
 ///
 /// Works for two flows:
@@ -82,9 +97,7 @@ async fn capture_screenshot(window: tauri::WebviewWindow) -> Result<Vec<u8>, Str
         .status();
 
     // Always reveal the window afterwards – success, cancel, or error.
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
+    reveal(&window);
 
     let status = status.map_err(|e| format!("Failed to launch screencapture: {}", e))?;
     if !status.success() {
@@ -256,6 +269,7 @@ pub fn run() {
             greet,
             save_image_to_folder,
             capture_screenshot,
+            reveal_window,
             read_clipboard_png,
             write_clipboard_png,
             read_text_file,

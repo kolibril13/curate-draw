@@ -435,17 +435,36 @@ export default function ScreenshotAnnotator() {
 		if (blob) await addScreenshot(blob);
 	}, [captureBlob, addScreenshot]);
 
-	// On desktop, launch straight into the selection tool: the window stays
-	// hidden (per tauri.conf) until the Rust side reveals it at the end of
-	// `capture_screenshot`. Gated on the editor being mounted so the incoming
-	// screenshot never races tldraw's init.
+	// On desktop, launch straight into a loaded screenshot: if the clipboard
+	// already holds an image, use that (silently — an empty clipboard on
+	// first launch is normal, not an error); otherwise fall back to the
+	// interactive capture. The window stays hidden (per tauri.conf) until
+	// either path reveals it — `captureScreenshot` does that itself, while
+	// the clipboard path calls `reveal_window` explicitly. Gated on the
+	// editor being mounted so the incoming screenshot never races tldraw's
+	// init.
+	const startupLoad = useCallback(async () => {
+		if (!IS_TAURI) return;
+		try {
+			const { invoke } = await import('@tauri-apps/api/core');
+			const bytes = await invoke<number[]>('read_clipboard_png');
+			const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
+			await loadScreenshot(blob);
+			await invoke('reveal_window');
+			return;
+		} catch {
+			// No image on the clipboard (or it couldn't be read) — capture instead.
+		}
+		await captureScreenshot();
+	}, [loadScreenshot, captureScreenshot]);
+
 	useEffect(() => {
 		if (!IS_TAURI) return;
 		if (!isEditorReady) return;
 		if (hasStartupCapturedRef.current) return;
 		hasStartupCapturedRef.current = true;
-		void captureScreenshot();
-	}, [isEditorReady, captureScreenshot]);
+		void startupLoad();
+	}, [isEditorReady, startupLoad]);
 
 	const readClipboardBlob = useCallback(async (): Promise<Blob | null> => {
 		if (IS_TAURI) {
