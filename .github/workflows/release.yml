@@ -1,0 +1,78 @@
+name: Release
+
+# Build, sign, and notarize the macOS app on a version tag, then attach the
+# signed .dmg + .app to a GitHub Release (created as a draft so you can review
+# before publishing).
+#
+# --- Required repository secrets (5) --------------------------------------
+# Settings -> Secrets and variables -> Actions -> New repository secret
+#
+#   APPLE_CERTIFICATE           base64 of your "Developer ID Application" .p12.
+#                               Export it from Keychain Access (right-click the
+#                               identity -> Export), then:
+#                                 base64 -i cert.p12 | pbcopy
+#   APPLE_CERTIFICATE_PASSWORD  the password you set when exporting the .p12
+#   APPLE_ID                    your Apple ID email (same one the local release uses)
+#   APPLE_PASSWORD              an app-specific password (appleid.apple.com ->
+#                               Sign-In & Security -> App-Specific Passwords)
+#   APPLE_TEAM_ID               D97HVFC4GT
+#
+# Not secrets (so not in the list above):
+#   * The signing identity is a public string already set in
+#     src-tauri/tauri.conf.json (bundle.macOS.signingIdentity) — no env needed.
+#   * KEYCHAIN_PASSWORD below is a throwaway for the ephemeral CI keychain, so
+#     it's a plain literal, not a secret.
+#   * GITHUB_TOKEN is provided automatically.
+#
+# --- Cutting a release -----------------------------------------------------
+# Bump "version" in package.json, commit, then push a matching tag:
+#   git tag v0.1.8 && git push origin v0.1.8
+# The workflow builds a universal (Intel + Apple Silicon) binary and opens a
+# draft release named after the tag. Review it on GitHub, then hit Publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write # create the GitHub Release and upload assets
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust (universal macOS targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build, sign, notarize, and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Ephemeral keychain, discarded when the job ends — no secret needed.
+          KEYCHAIN_PASSWORD: ci-throwaway-keychain
+          # Signing identity comes from src-tauri/tauri.conf.json, not an env var.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Curate Draw ${{ github.ref_name }}
+          releaseBody: Download the signed, notarized macOS app below.
+          releaseDraft: true
+          prerelease: false
+          args: --target universal-apple-darwin
