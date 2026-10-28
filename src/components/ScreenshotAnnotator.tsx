@@ -98,17 +98,14 @@ function isOutputFormat(value: string | null): value is OutputFormat {
 const IS_TAURI =
 	typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-const UPDATE_CHECK_URL = 'https://jan-hendrik-mueller.de/curate-draw-version.json';
+// Manual-download fallback when the in-app updater fails.
 const DOWNLOAD_URL = 'https://jan-hendrik-mueller.de/tools/curate-draw/';
 
-function isNewerVersion(remote: string, local: string): boolean {
-	const parse = (v: string) => v.split('.').map(Number);
-	const [rMaj = 0, rMin = 0, rPatch = 0] = parse(remote);
-	const [lMaj = 0, lMin = 0, lPatch = 0] = parse(local);
-	if (rMaj !== lMaj) return rMaj > lMaj;
-	if (rMin !== lMin) return rMin > lMin;
-	return rPatch > lPatch;
-}
+type UpdateState =
+	| { phase: 'available'; version: string }
+	| { phase: 'downloading'; version: string; percent: number | null }
+	| { phase: 'ready'; version: string }
+	| { phase: 'error'; version: string; message: string };
 
 // Format a Date as `YYYY-MM-DD-HH-mm-ss` so saved files sort lexicographically
 // and stay readable when grepping a folder later. Local time, not UTC, since
@@ -830,24 +827,57 @@ export default function ScreenshotAnnotator() {
 	}, []);
 
 	const [showAbout, setShowAbout] = useState(false);
-	const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+	const [update, setUpdate] = useState<UpdateState | null>(null);
 	const [updateDismissed, setUpdateDismissed] = useState(false);
+	const pendingUpdateRef = useRef<import('@tauri-apps/plugin-updater').Update | null>(null);
 
+	// Check GitHub's latest.json on launch. Nothing is downloaded until the
+	// user confirms via the banner's "Install" button.
 	useEffect(() => {
 		if (!IS_TAURI) return;
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), 5000);
-		fetch(UPDATE_CHECK_URL, { signal: controller.signal })
-			.then((r) => r.json())
-			.then((data: unknown) => {
-				if (data && typeof data === 'object' && 'version' in data && typeof (data as { version: unknown }).version === 'string') {
-					const remote = (data as { version: string }).version;
-					if (isNewerVersion(remote, __APP_VERSION__)) setUpdateAvailable(remote);
+		let cancelled = false;
+		(async () => {
+			try {
+				const { check } = await import('@tauri-apps/plugin-updater');
+				const found = await check({ timeout: 5000 });
+				if (cancelled || !found) return;
+				pendingUpdateRef.current = found;
+				setUpdate({ phase: 'available', version: found.version });
+			} catch {
+				// Offline or no release metadata — stay quiet.
+			}
+		})();
+		return () => { cancelled = true; };
+	}, []);
+
+	const installUpdate = useCallback(async () => {
+		const pending = pendingUpdateRef.current;
+		if (!pending) return;
+		const version = pending.version;
+		let total = 0;
+		let received = 0;
+		setUpdate({ phase: 'downloading', version, percent: null });
+		try {
+			await pending.downloadAndInstall((event) => {
+				if (event.event === 'Started') {
+					total = event.data.contentLength ?? 0;
+				} else if (event.event === 'Progress') {
+					received += event.data.chunkLength;
+					if (total > 0) {
+						setUpdate({ phase: 'downloading', version, percent: Math.round((received / total) * 100) });
+					}
 				}
-			})
-			.catch(() => {})
-			.finally(() => clearTimeout(timer));
-		return () => { controller.abort(); clearTimeout(timer); };
+			});
+			setUpdate({ phase: 'ready', version });
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			setUpdate({ phase: 'error', version, message });
+		}
+	}, []);
+
+	const restartApp = useCallback(async () => {
+		const { relaunch } = await import('@tauri-apps/plugin-process');
+		await relaunch();
 	}, []);
 
 	useEscape(showAbout, () => setShowAbout(false));
@@ -1022,20 +1052,48 @@ export default function ScreenshotAnnotator() {
 				</div>
 			</div>
 
-			{updateAvailable && !updateDismissed && (
+			{update && !updateDismissed && (
 				<div className="sa-update-banner" role="status">
-					<span>Update available — v{updateAvailable}</span>
-					<a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className="sa-update-link">
-						Download
-					</a>
-					<button
-						type="button"
-						className="sa-update-dismiss"
-						aria-label="Dismiss update notification"
-						onClick={() => setUpdateDismissed(true)}
-					>
-						×
-					</button>
+					{update.phase === 'available' && (
+						<>
+							<span>Update available — v{update.version}</span>
+							<button type="button" className="sa-update-link" onClick={installUpdate}>
+								Install
+							</button>
+						</>
+					)}
+					{update.phase === 'downloading' && (
+						<span>
+							Downloading v{update.version}
+							{update.percent !== null ? ` — ${update.percent}%` : '…'}
+						</span>
+					)}
+					{update.phase === 'ready' && (
+						<>
+							<span>v{update.version} installed</span>
+							<button type="button" className="sa-update-link" onClick={restartApp}>
+								Restart
+							</button>
+						</>
+					)}
+					{update.phase === 'error' && (
+						<>
+							<span title={update.message}>Update failed</span>
+							<a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className="sa-update-link">
+								Download manually
+							</a>
+						</>
+					)}
+					{update.phase !== 'downloading' && (
+						<button
+							type="button"
+							className="sa-update-dismiss"
+							aria-label="Dismiss update notification"
+							onClick={() => setUpdateDismissed(true)}
+						>
+							×
+						</button>
+					)}
 				</div>
 			)}
 

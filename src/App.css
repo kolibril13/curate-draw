@@ -566,6 +566,10 @@ body,
 	text-decoration: underline;
 	text-underline-offset: 2px;
 	white-space: nowrap;
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
 }
 
 .sa-update-dismiss {

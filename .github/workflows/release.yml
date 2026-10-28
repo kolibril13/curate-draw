@@ -15,6 +15,9 @@ name: Release
 #   APPLE_PASSWORD              an app-specific password (appleid.apple.com ->
 #                               Sign-In & Security -> App-Specific Passwords)
 #   APPLE_TEAM_ID               D97HVFC4GT
+#   TAURI_SIGNING_PRIVATE_KEY   contents of ~/.tauri/curate-draw.key (updater
+#                               signing key, no password). Its public half is
+#                               plugins.updater.pubkey in tauri.conf.json.
 #
 # Not secrets (so not in the list above):
 #   * The signing identity is a public string already set in
@@ -73,6 +76,10 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater bundle; tauri-action then uploads latest.json,
+          # which the in-app updater reads from releases/latest.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Curate Draw ${{ github.ref_name }}
